@@ -165,3 +165,4 @@ jobs:
           git add .github/upstream-baseline.txt
           git commit -m "chore: record upstream tag ${{ steps.latest.outputs.tag }}"
           git push origin stable
+          git push origin "${{ steps.latest.outputs.tag }}"
