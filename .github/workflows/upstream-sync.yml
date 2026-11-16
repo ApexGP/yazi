@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout stable
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: stable
           fetch-depth: 0
@@ -49,12 +49,14 @@ jobs:
           else
             baseline="$(git describe --tags --abbrev=0)"
           fi
-          echo "value=$baseline" >> "$GITHUB_OUTPUT"
-          if [ "$baseline" = "${{ steps.latest.outputs.tag }}" ]; then
-            echo "current=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "current=false" >> "$GITHUB_OUTPUT"
-          fi
+          {
+            echo "value=$baseline"
+            if [ "$baseline" = "${{ steps.latest.outputs.tag }}" ]; then
+              echo "current=true"
+            else
+              echo "current=false"
+            fi
+          } >> "$GITHUB_OUTPUT"
           echo "baseline: $baseline"
 
       - name: Nothing to sync
