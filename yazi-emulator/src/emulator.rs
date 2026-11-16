@@ -82,7 +82,14 @@ impl Emulator {
 			Report::Da1(attrs) => self.sixel.set(attrs.contains(&4)),
 			Report::XtVersion(version) => {
 				self.version.store(version.to_string().into());
-				if let Some(brand) = Brand::from_csi(version) {
+
+				// Embedded terminals (e.g. Neovim's libvterm) report their own
+				// name via XTVERSION, but graphics are rendered by the host
+				// terminal. Keep a brand detected from the environment (such as
+				// KITTY_WINDOW_ID) instead of downgrading it to VTerm.
+				if let Some(brand) = Brand::from_csi(version)
+					&& (brand != Brand::VTerm || self.brand.get() == Brand::Unknown)
+				{
 					self.brand.set(brand);
 				}
 			}
@@ -152,5 +159,39 @@ impl Emulator {
 		}
 
 		TERM.dimension().ratio().is_none_or(|(rw, rh)| rw.floor() as u16 != w || rh.floor() as u16 != h)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn xtversion(version: &str) -> Report { Report::XtVersion(version.into()) }
+
+	#[test]
+	fn libvterm_does_not_override_an_env_detected_brand() {
+		let emulator = Emulator { brand: Brand::Kitty.into(), ..Default::default() };
+
+		emulator.apply(&xtversion("libvterm (0.3)"));
+
+		assert_eq!(emulator.brand.get(), Brand::Kitty);
+	}
+
+	#[test]
+	fn libvterm_sets_the_brand_when_the_environment_did_not_detect_one() {
+		let emulator = Emulator::default();
+
+		emulator.apply(&xtversion("libvterm (0.3)"));
+
+		assert_eq!(emulator.brand.get(), Brand::VTerm);
+	}
+
+	#[test]
+	fn other_terminal_versions_still_override_the_environment_brand() {
+		let emulator = Emulator { brand: Brand::Kitty.into(), ..Default::default() };
+
+		emulator.apply(&xtversion("tmux 3.8"));
+
+		assert_eq!(emulator.brand.get(), Brand::Tmux);
 	}
 }
