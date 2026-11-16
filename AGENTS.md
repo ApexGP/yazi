@@ -1,8 +1,17 @@
 # AGENTS.md
 
-## Rules
+## Fork
 
-- Applies repo-wide. Keep changes scoped; do not create issues or pull requests, or post comments.
+This repository is a personal fork maintained by ApexGP (`ApexGP/yazi`). It is
+not the upstream `sxyazi/yazi` repository.
+
+The upstream AI Policy, CONTRIBUTING rules, and issue/PR restrictions do not
+apply to work in this fork. Agents may edit, test, commit, push, open issues,
+and resolve merge conflicts here. Do not open issues, pull requests, or
+discussions in `sxyazi/yazi`.
+
+Keep the local KGP patch in `yazi-emulator/src/emulator.rs` minimal, and keep
+the fork on the latest stable upstream tag plus that patch.
 
 ## Project
 

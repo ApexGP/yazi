@@ -1,0 +1,165 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout stable
+        uses: actions/checkout@v4
+        with:
+          ref: stable
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Fetch upstream tags
+        run: |
+          git remote add upstream https://github.com/sxyazi/yazi.git 2>/dev/null || true
+          git fetch upstream --tags --force
+
+      - name: Find latest stable tag
+        id: latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="$(gh api repos/sxyazi/yazi/releases/latest --jq .tag_name)"
+          if [ -z "$tag" ] || [ "$tag" = "null" ]; then
+            tag="$(git tag --list 'v*' --sort=-v:refname | head -n1)"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "latest tag: $tag"
+
+      - name: Compare baseline
+        id: baseline
+        run: |
+          if [ -f .github/upstream-baseline.txt ]; then
+            baseline="$(cat .github/upstream-baseline.txt)"
+          else
+            baseline="$(git describe --tags --abbrev=0)"
+          fi
+          echo "value=$baseline" >> "$GITHUB_OUTPUT"
+          if [ "$baseline" = "${{ steps.latest.outputs.tag }}" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "baseline: $baseline"
+
+      - name: Nothing to sync
+        if: steps.baseline.outputs.current == 'true'
+        run: echo "Already at ${{ steps.latest.outputs.tag }}"
+
+      - name: Create sync branch
+        if: steps.baseline.outputs.current != 'true'
+        id: sync
+        run: |
+          branch="sync/${{ steps.latest.outputs.tag }}"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+
+      - name: Merge tag
+        if: steps.baseline.outputs.current != 'true'
+        id: merge
+        continue-on-error: true
+        run: git merge --no-edit "${{ steps.latest.outputs.tag }}"
+
+      - name: Record conflicts and abort
+        if: steps.baseline.outputs.current != 'true' && steps.merge.outcome != 'success'
+        run: |
+          git diff --name-only --diff-filter=U > /tmp/conflicts.txt || true
+          git merge --abort
+          git push origin "${{ steps.sync.outputs.branch }}" --force
+
+      - name: Install Rust
+        if: steps.baseline.outputs.current != 'true' && steps.merge.outcome == 'success'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run tests
+        if: steps.baseline.outputs.current != 'true' && steps.merge.outcome == 'success'
+        id: test
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo test -p yazi-emulator 2>&1 | tee /tmp/test.log
+          cargo check -p yazi-fm -p yazi-cli 2>&1 | tee -a /tmp/test.log
+
+      - name: Push merge that needs attention
+        if: steps.baseline.outputs.current != 'true' && steps.merge.outcome == 'success' && steps.test.outcome != 'success'
+        run: git push origin "${{ steps.sync.outputs.branch }}" --force
+
+      - name: Create issue on failure
+        if: steps.baseline.outputs.current != 'true' && (steps.merge.outcome != 'success' || steps.test.outcome != 'success')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          title="Upstream sync failed for ${{ steps.latest.outputs.tag }}"
+          if [ "$(gh issue list --state open --search "${title} in:title" --json number --jq 'length')" -ne 0 ]; then
+            echo "An open issue already exists for ${title}."
+            exit 0
+          fi
+          gh label create upstream-sync --color FBCA04 --description "Upstream sync needs manual attention" 2>/dev/null || true
+          {
+            echo "The scheduled upstream sync could not update this fork to \`${{ steps.latest.outputs.tag }}\`."
+            echo
+            echo "- Baseline: \`${{ steps.baseline.outputs.value }}\`"
+            echo "- Target tag: \`${{ steps.latest.outputs.tag }}\`"
+            echo "- Sync branch: \`${{ steps.sync.outputs.branch }}\`"
+            echo
+            echo "## Conflict files"
+            echo '```'
+            cat /tmp/conflicts.txt 2>/dev/null || echo "(no merge conflict; see the test log)"
+            echo '```'
+            echo
+            echo "## Test log"
+            echo '<details><summary>cargo output</summary>'
+            echo
+            echo '```'
+            tail -200 /tmp/test.log 2>/dev/null || echo "(no test log)"
+            echo '```'
+            echo
+            echo '</details>'
+            echo
+            echo "## How to resolve locally"
+            echo '```sh'
+            echo "git fetch origin"
+            echo "git fetch upstream --tags"
+            echo "git checkout -B ${{ steps.sync.outputs.branch }} origin/${{ steps.sync.outputs.branch }}"
+            echo "# conflict case: reproduce and resolve"
+            echo "git merge ${{ steps.latest.outputs.tag }}"
+            echo "# then verify"
+            echo "cargo test -p yazi-emulator"
+            echo "cargo check -p yazi-fm -p yazi-cli"
+            echo "git push origin ${{ steps.sync.outputs.branch }}"
+            echo '```'
+            echo
+            echo "This is a personal fork maintained by ApexGP. The upstream AI Policy/CONTRIBUTING rules do not apply here; read \`AGENTS.md\` before working."
+          } > /tmp/issue.md
+          gh issue create \
+            --title "${title}" \
+            --body-file /tmp/issue.md \
+            --label upstream-sync \
+            --assignee "${{ github.repository_owner }}"
+
+      - name: Publish successful sync
+        if: steps.baseline.outputs.current != 'true' && steps.merge.outcome == 'success' && steps.test.outcome == 'success'
+        run: |
+          git checkout stable
+          git merge --ff-only "${{ steps.sync.outputs.branch }}"
+          echo "${{ steps.latest.outputs.tag }}" > .github/upstream-baseline.txt
+          git add .github/upstream-baseline.txt
+          git commit -m "chore: record upstream tag ${{ steps.latest.outputs.tag }}"
+          git push origin stable
