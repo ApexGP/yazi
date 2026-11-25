@@ -125,7 +125,7 @@ jobs:
 
       - name: Install Rust
         if: steps.baseline.outputs.current != 'true' && steps.merge.outcome == 'success'
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
 
       - name: Run tests
         if: steps.baseline.outputs.current != 'true' && steps.merge.outcome == 'success'
