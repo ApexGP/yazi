@@ -77,7 +77,30 @@ jobs:
         if: steps.baseline.outputs.current != 'true'
         id: merge
         continue-on-error: true
-        run: git merge --no-edit "${{ steps.latest.outputs.tag }}"
+        run: |
+          if git merge --no-edit "${{ steps.latest.outputs.tag }}"; then
+            exit 0
+          fi
+
+          conflicts="$(git diff --name-only --diff-filter=U)"
+          if [ -z "$conflicts" ]; then
+            echo "Merge failed without conflicting files"
+            exit 1
+          fi
+
+          non_workflow="$(printf '%s\n' "$conflicts" | grep -v '^\.github/workflows/' || true)"
+          if [ -n "$non_workflow" ]; then
+            echo "Conflicts outside .github/workflows:"
+            printf '%s\n' "$non_workflow"
+            exit 1
+          fi
+
+          # Upstream workflow changes are not applicable to this fork. Keep
+          # ours and complete the merge; the next step normalizes the whole
+          # .github/workflows directory from stable.
+          git checkout --ours -- .github/workflows
+          git add .github/workflows
+          git commit --no-edit
 
       - name: Keep the fork's workflows
         if: steps.baseline.outputs.current != 'true' && steps.merge.outcome == 'success'
@@ -137,7 +160,11 @@ jobs:
             echo "An open issue already exists for ${title}."
             exit 0
           fi
-          gh label create upstream-sync --color FBCA04 --description "Upstream sync needs manual attention" 2>/dev/null || true
+          gh label create upstream-sync --color FBCA04 --description "Upstream sync needs manual attention" || true
+          label_args=()
+          if gh label view upstream-sync >/dev/null 2>&1; then
+            label_args=(--label upstream-sync)
+          fi
           {
             echo "The scheduled upstream sync could not update this fork to \`${{ steps.latest.outputs.tag }}\`."
             echo
@@ -182,5 +209,5 @@ jobs:
           gh issue create \
             --title "${title}" \
             --body-file /tmp/issue.md \
-            --label upstream-sync \
+            "${label_args[@]}" \
             --assignee "${{ github.repository_owner }}"
