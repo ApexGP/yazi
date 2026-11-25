@@ -16,6 +16,10 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    env:
+      # The upstream remote makes gh default to sxyazi/yazi; target the fork
+      # explicitly for issue/label commands.
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: Checkout stable
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -156,13 +160,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           title="Upstream sync failed for ${{ steps.latest.outputs.tag }}"
-          if [ "$(gh issue list --state open --search "${title} in:title" --json number --jq 'length')" -ne 0 ]; then
+          if [ "$(gh issue list -R "${{ github.repository }}" --state open --search "${title} in:title" --json number --jq 'length')" -ne 0 ]; then
             echo "An open issue already exists for ${title}."
             exit 0
           fi
-          gh label create upstream-sync --color FBCA04 --description "Upstream sync needs manual attention" || true
+          gh label create upstream-sync -R "${{ github.repository }}" --color FBCA04 --description "Upstream sync needs manual attention" || true
           label_args=()
-          if gh label view upstream-sync >/dev/null 2>&1; then
+          if gh label view upstream-sync -R "${{ github.repository }}" >/dev/null 2>&1; then
             label_args=(--label upstream-sync)
           fi
           {
@@ -207,6 +211,7 @@ jobs:
             echo "This is a personal fork maintained by ApexGP. The upstream AI Policy/CONTRIBUTING rules do not apply here; read \`AGENTS.md\` before working."
           } > /tmp/issue.md
           gh issue create \
+            -R "${{ github.repository }}" \
             --title "${title}" \
             --body-file /tmp/issue.md \
             "${label_args[@]}" \
