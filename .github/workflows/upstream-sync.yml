@@ -166,7 +166,7 @@ jobs:
           fi
           gh label create upstream-sync -R "${{ github.repository }}" --color FBCA04 --description "Upstream sync needs manual attention" || true
           label_args=()
-          if gh label view upstream-sync -R "${{ github.repository }}" >/dev/null 2>&1; then
+          if gh api "repos/${{ github.repository }}/labels/upstream-sync" >/dev/null 2>&1; then
             label_args=(--label upstream-sync)
           fi
           {
